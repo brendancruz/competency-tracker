@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithPopup, GoogleAuthProvider, onAuthStateChanged, signOut } from 'firebase/auth';
 import { getFirestore, doc, setDoc, getDoc } from 'firebase/firestore';
-import { BarChart3, Brain, Calculator, TrendingUp, Users, Target, Briefcase, PieChart, MessageSquare, Building2, FileText, ChevronDown, ChevronRight, Plus, X, Edit3, AlertTriangle, Star, Zap, RefreshCw, Settings, LogIn, LogOut, Layers } from 'lucide-react';
+import { BarChart3, Brain, Calculator, TrendingUp, Users, Target, Briefcase, PieChart, MessageSquare, Building2, FileText, ChevronDown, ChevronRight, Plus, X, Edit3, AlertTriangle, Star, Zap, RefreshCw, Settings, LogIn, LogOut, Layers, Clock } from 'lucide-react';
 
 const firebaseConfig = {
   apiKey: "AIzaSyBmBYLOs8qe5_oGvel37pEas9cpaz6Kmyk",
@@ -164,7 +164,8 @@ export default function App() {
   const [lastSaved, setLastSaved] = useState(null);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState({ background_fit: true });
-  const [inputMode, setInputMode] = useState(null);
+  const [ratingSkill, setRatingSkill] = useState(null);
+  const [ratingEvidence, setRatingEvidence] = useState('');
   const [editingSkill, setEditingSkill] = useState(null);
   const [addingCat, setAddingCat] = useState(false);
   const [addingSub, setAddingSub] = useState(null);
@@ -271,6 +272,23 @@ export default function App() {
   const deleteCategory = (catId) => setCategories(prev => prev.filter(c => c.id !== catId));
   const updateSkill = (catId, skillId, updates) => setCategories(prev => prev.map(c => c.id === catId ? { ...c, subcategories: c.subcategories.map(s => s.id === skillId ? { ...s, ...updates } : s) } : c));
 
+  // Rate skill with evidence - the core principle: no rating without evidence
+  const rateWithEvidence = (catId, skillId, level) => {
+    if (!ratingEvidence.trim()) return; // Must have evidence
+    const timestamp = new Date().toISOString();
+    updateSkill(catId, skillId, { 
+      level, 
+      evidence: [...(allSkills.find(s => s.id === skillId)?.evidence || []), { 
+        text: ratingEvidence, 
+        level, 
+        date: new Date().toLocaleDateString(),
+        timestamp 
+      }] 
+    });
+    setRatingSkill(null);
+    setRatingEvidence('');
+  };
+
   const addSubcategory = (catId) => {
     if (!newName.trim()) return;
     setCategories(prev => prev.map(c => c.id === catId ? { ...c, subcategories: [...c.subcategories, { id: `${catId}_${Date.now()}`, name: newName, level: null, floor: defaultFloor, diffBar: 7, floorCritical: true, highWeight: false, evidence: [], notes: '' }] } : c));
@@ -302,18 +320,25 @@ export default function App() {
   const yellowZone = ratedSkills.filter(s => s.level >= s.floor && s.level < s.diffBar);
   const greenZone = ratedSkills.filter(s => s.level >= s.diffBar);
 
+  // Get all evidence entries with skill info for timeline, sorted by timestamp
+  const allEvidence = allSkills.flatMap(s => 
+    (s.evidence || []).map(e => ({ ...e, skillName: s.name, skillId: s.id, catId: s.catId, catName: s.catName, floor: s.floor }))
+  ).sort((a, b) => new Date(b.timestamp || b.date) - new Date(a.timestamp || a.date));
+
+  // Skills with progress (multiple evidence entries)
+  const skillsWithProgress = allSkills.filter(s => s.evidence && s.evidence.length > 1).map(s => {
+    const firstLevel = s.evidence[0].level;
+    const lastLevel = s.evidence[s.evidence.length - 1].level;
+    const trend = lastLevel - firstLevel;
+    return { ...s, firstLevel, lastLevel, trend, entries: s.evidence.length };
+  }).sort((a, b) => b.entries - a.entries);
+
   const SkillRow = ({ skill, catId, compact = false }) => {
     const zone = getZone(skill);
-    const [localEvidence, setLocalEvidence] = useState('');
     const [localNotes, setLocalNotes] = useState(skill.notes || '');
-    const isActive = inputMode === skill.id;
+    const isRating = ratingSkill === skill.id;
     const isEditing = editingSkill === skill.id;
     
-    const handleAddEvidence = (level) => {
-      if (!localEvidence.trim()) return;
-      updateSkill(catId, skill.id, { evidence: [...(skill.evidence || []), { text: localEvidence, level, date: new Date().toLocaleDateString() }], level });
-      setLocalEvidence(''); setInputMode(null);
-    };
     const handleSaveEdit = () => { updateSkill(catId, skill.id, { notes: localNotes }); setEditingSkill(null); };
     
     if (compact) {
@@ -337,16 +362,49 @@ export default function App() {
           </div>
           <div className="flex items-center gap-2">
             <button onClick={() => setEditingSkill(isEditing ? null : skill.id)} className="text-gray-400 hover:text-blue-500"><Edit3 className="w-3 h-3" /></button>
-            <button onClick={() => setInputMode(isActive ? null : skill.id)} className="text-xs text-blue-600 hover:text-blue-800">{isActive ? 'Close' : '+ Evidence'}</button>
+            <button onClick={() => { setRatingSkill(isRating ? null : skill.id); setRatingEvidence(''); }} className="text-xs text-blue-600 hover:text-blue-800">{isRating ? 'Cancel' : 'Rate'}</button>
             <button onClick={() => deleteSkill(catId, skill.id)} className="text-gray-400 hover:text-red-500"><X className="w-3 h-3" /></button>
           </div>
         </div>
+        
+        {/* Current level display (read-only, shows current rating) */}
         <div className="flex gap-1 mb-2">
           {levels.map(l => (
-            <button key={l.value} onClick={() => updateSkill(catId, skill.id, { level: l.value })} className={`w-8 h-8 rounded text-xs font-bold transition-all ${skill.level === l.value ? l.color + ' text-white ring-2 ring-gray-800' : skill.level !== null && skill.level > l.value ? l.color + ' text-white/60' : 'bg-gray-100 text-gray-400'} ${l.value === skill.floor ? 'ring-2 ring-orange-400 ring-offset-1' : ''} ${l.value === skill.diffBar ? 'ring-2 ring-emerald-400 ring-offset-1' : ''}`}>{l.value}</button>
+            <div key={l.value} className={`w-8 h-8 rounded text-xs font-bold flex items-center justify-center ${skill.level === l.value ? l.color + ' text-white ring-2 ring-gray-800' : skill.level !== null && skill.level > l.value ? l.color + ' text-white/60' : 'bg-gray-100 text-gray-400'} ${l.value === skill.floor ? 'ring-2 ring-orange-400 ring-offset-1' : ''} ${l.value === skill.diffBar ? 'ring-2 ring-emerald-400 ring-offset-1' : ''}`}>{l.value}</div>
           ))}
         </div>
+        
         <div className="flex justify-between text-xs text-gray-500"><span>Floor: <b className="text-orange-600">{skill.floor}</b></span><span>Diff: <b className="text-emerald-600">{skill.diffBar}</b></span></div>
+
+        {/* Rating with evidence - MUST provide evidence to rate */}
+        {isRating && (
+          <div className="mt-3 p-3 bg-white border-2 border-blue-300 rounded">
+            <p className="text-xs text-gray-600 mb-2 font-medium">⚠️ Evidence required to rate. What justifies this rating?</p>
+            <input 
+              type="text" 
+              placeholder="e.g., 'Answered 8/10 correctly in mock interview'" 
+              value={ratingEvidence} 
+              onChange={e => setRatingEvidence(e.target.value)} 
+              className="w-full p-2 border rounded text-sm mb-2" 
+              autoFocus 
+            />
+            <p className="text-xs text-gray-500 mb-2">Select level (only clickable after entering evidence):</p>
+            <div className="flex gap-1">
+              {levels.map(l => (
+                <button 
+                  key={l.value} 
+                  onClick={() => rateWithEvidence(catId, skill.id, l.value)} 
+                  disabled={!ratingEvidence.trim()}
+                  className={`flex-1 py-2 rounded text-xs font-bold ${l.color} text-white ${!ratingEvidence.trim() ? 'opacity-40 cursor-not-allowed' : 'hover:opacity-90'}`}
+                >
+                  {l.value}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Edit mode for floor/diffBar/notes */}
         {isEditing && (
           <div className="mt-3 p-3 bg-white border rounded space-y-2">
             <div className="flex gap-4">
@@ -358,17 +416,14 @@ export default function App() {
             <button onClick={handleSaveEdit} className="text-xs bg-blue-600 text-white px-3 py-1 rounded">Save</button>
           </div>
         )}
-        {isActive && (
-          <div className="mt-3 p-3 bg-white border rounded">
-            <input type="text" placeholder="Evidence: 'answered 8/10 correctly'" value={localEvidence} onChange={e => setLocalEvidence(e.target.value)} className="w-full p-2 border rounded text-sm mb-2" autoFocus />
-            <div className="flex gap-1">{levels.map(l => (<button key={l.value} onClick={() => handleAddEvidence(l.value)} className={`flex-1 py-1.5 rounded text-xs font-bold ${l.color} text-white`}>{l.value}</button>))}</div>
-            <button onClick={() => setInputMode(null)} className="mt-2 text-xs text-gray-500">Cancel</button>
-          </div>
-        )}
+
         {skill.notes && !isEditing && <div className="mt-2 text-xs text-gray-600 italic bg-gray-50 p-2 rounded">{skill.notes}</div>}
-        {skill.evidence && skill.evidence.length > 0 && !isActive && (
+        
+        {/* Evidence history */}
+        {skill.evidence && skill.evidence.length > 0 && !isRating && (
           <div className="mt-2 pt-2 border-t text-xs text-gray-500">
-            {skill.evidence.slice(-2).map((e, i) => (<div key={i} className="flex gap-2 mb-1"><span className={`px-1 rounded ${levels[e.level - 1]?.color} text-white font-bold`}>{e.level}</span><span>{e.text}</span></div>))}
+            <div className="text-xs text-gray-400 mb-1">{skill.evidence.length} rating{skill.evidence.length > 1 ? 's' : ''}</div>
+            {skill.evidence.slice(-2).map((e, i) => (<div key={i} className="flex gap-2 mb-1"><span className={`px-1 rounded ${levels[e.level - 1]?.color} text-white font-bold`}>{e.level}</span><span className="flex-1">{e.text}</span><span className="text-gray-400">{e.date}</span></div>))}
           </div>
         )}
       </div>
@@ -427,7 +482,7 @@ export default function App() {
       )}
 
       <div className="flex border-b bg-white">
-        {[{ id: 'histogram', label: 'Histogram', icon: BarChart3 }, { id: 'priority', label: 'Priority', icon: Target }, { id: 'categories', label: 'Categories', icon: Layers }].map(v => (
+        {[{ id: 'histogram', label: 'Histogram', icon: BarChart3 }, { id: 'priority', label: 'Priority', icon: Target }, { id: 'categories', label: 'Categories', icon: Layers }, { id: 'timeline', label: 'Timeline', icon: Clock }].map(v => (
           <button key={v.id} onClick={() => setView(v.id)} className={`flex-1 py-3 text-sm font-medium flex items-center justify-center gap-1 ${view === v.id ? 'border-b-2 border-blue-600 text-blue-600' : 'text-gray-500'}`}><v.icon className="w-4 h-4" />{v.label}</button>
         ))}
       </div>
@@ -553,6 +608,61 @@ export default function App() {
                 <button onClick={() => { setAddingCat(false); setNewName(''); }} className="px-4 py-2 border rounded">Cancel</button>
               </div>
             ) : <button onClick={() => setAddingCat(true)} className="mt-4 text-blue-600 hover:text-blue-800 flex items-center gap-1"><Plus className="w-4 h-4" /> Add Category</button>}
+          </div>
+        )}
+
+        {view === 'timeline' && (
+          <div className="space-y-6">
+            {/* Progress Development */}
+            <div className="bg-white rounded-lg border p-4">
+              <h3 className="font-bold mb-4 flex items-center gap-2"><TrendingUp className="w-4 h-4" /> Progress Development</h3>
+              <p className="text-sm text-gray-600 mb-4">Skills with multiple ratings showing your development over time.</p>
+              {skillsWithProgress.length === 0 ? (
+                <p className="text-sm text-gray-500">No skills with multiple ratings yet. Rate skills multiple times to track progress.</p>
+              ) : (
+                <div className="space-y-2">
+                  {skillsWithProgress.map(s => (
+                    <div key={s.id} className="flex items-center gap-3 p-3 bg-gray-50 rounded border">
+                      <div className="flex-1">
+                        <div className="font-medium text-sm">{s.name}</div>
+                        <div className="text-xs text-gray-500">{s.catName} • {s.entries} ratings</div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className={`px-2 py-0.5 rounded ${levels[s.firstLevel - 1]?.color} text-white font-bold text-xs`}>{s.firstLevel}</span>
+                        <span className="text-gray-400">→</span>
+                        <span className={`px-2 py-0.5 rounded ${levels[s.lastLevel - 1]?.color} text-white font-bold text-xs`}>{s.lastLevel}</span>
+                        <span className={`text-sm font-medium ${s.trend > 0 ? 'text-green-600' : s.trend < 0 ? 'text-red-600' : 'text-gray-500'}`}>
+                          {s.trend > 0 ? `↑ +${s.trend}` : s.trend < 0 ? `↓ ${s.trend}` : '—'}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Recent Activity */}
+            <div className="bg-white rounded-lg border p-4">
+              <h3 className="font-bold mb-4 flex items-center gap-2"><Clock className="w-4 h-4" /> Recent Activity</h3>
+              <p className="text-sm text-gray-600 mb-4">All evidence entries, most recent first.</p>
+              {allEvidence.length === 0 ? (
+                <p className="text-sm text-gray-500">No activity yet. Start rating skills with evidence to see your timeline.</p>
+              ) : (
+                <div className="space-y-2">
+                  {allEvidence.slice(0, 30).map((e, i) => (
+                    <div key={i} className="flex items-start gap-3 p-3 bg-gray-50 rounded border">
+                      <span className={`px-2 py-0.5 rounded ${levels[e.level - 1]?.color} text-white font-bold text-xs shrink-0`}>{e.level}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium text-sm">{e.skillName}</div>
+                        <div className="text-xs text-gray-600 mt-0.5">{e.text}</div>
+                        <div className="text-xs text-gray-400 mt-1">{e.catName} • {e.date}</div>
+                      </div>
+                    </div>
+                  ))}
+                  {allEvidence.length > 30 && <p className="text-xs text-gray-500 text-center">Showing 30 of {allEvidence.length} entries</p>}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>
