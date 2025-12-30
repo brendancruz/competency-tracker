@@ -153,6 +153,39 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [defaultFloor, setDefaultFloor] = useState(4);
 
+  const exportData = () => {
+    const data = { categories, defaultFloor, exportDate: new Date().toISOString() };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `competency-tracker-backup-${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const importData = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const data = JSON.parse(event.target?.result);
+        if (data.categories) {
+          setCategories(data.categories);
+          if (data.defaultFloor) setDefaultFloor(data.defaultFloor);
+          alert('Data imported successfully!');
+        } else {
+          alert('Invalid backup file');
+        }
+      } catch (err) {
+        alert('Error reading file');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
   useEffect(() => {
     try {
       const saved = localStorage.getItem('competency-tracker-data');
@@ -296,6 +329,17 @@ export default function App() {
                 <button key={n} onClick={() => setAllFloors(n)} className="w-8 h-8 rounded text-sm font-bold bg-white border text-gray-600 hover:bg-gray-100">{n}</button>
               ))}
             </div>
+          </div>
+          <div className="mt-3 pt-3 border-t border-blue-200">
+            <label className="text-sm text-blue-800 block mb-2">Backup & Restore:</label>
+            <div className="flex gap-2">
+              <button onClick={exportData} className="px-3 py-1.5 bg-blue-500 text-white rounded text-sm">Export Data</button>
+              <label className="px-3 py-1.5 bg-white border border-blue-300 text-blue-600 rounded text-sm cursor-pointer hover:bg-blue-50">
+                Import Data
+                <input type="file" accept=".json" onChange={importData} className="hidden" />
+              </label>
+            </div>
+            <p className="text-xs text-blue-600 mt-1">Export to backup your progress or transfer to another device</p>
           </div>
         </div>
       )}
