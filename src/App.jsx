@@ -703,13 +703,26 @@ export default function App() {
           <div className="space-y-4">
             <div className="bg-white rounded-xl p-4">
               <h3 className="font-bold mb-4">Distribution</h3>
-              <div className="flex items-end gap-1 h-40 mb-2">
-                {histogramData.map(d => (
-                  <div key={d.level} className="flex-1 flex flex-col items-center">
-                    <span className="text-xs font-bold mb-1">{d.skills.length || ''}</span>
-                    <div className="w-full rounded-t-lg" style={{ height: `${(d.skills.length / maxHistogramCount) * 100}%`, minHeight: '4px', backgroundColor: d.color }} />
-                  </div>
-                ))}
+              {/* Fixed height container with relative positioning */}
+              <div className="relative h-44 mb-2">
+                <div className="absolute inset-0 flex items-end gap-1">
+                  {histogramData.map(d => {
+                    const heightPercent = maxHistogramCount > 0 ? (d.skills.length / maxHistogramCount) * 100 : 0;
+                    const heightPx = Math.max(4, (d.skills.length / maxHistogramCount) * 160); // 160px max height
+                    return (
+                      <div key={d.level} className="flex-1 flex flex-col items-center justify-end h-full">
+                        <span className="text-xs font-bold mb-1">{d.skills.length > 0 ? d.skills.length : ''}</span>
+                        <div 
+                          className="w-full rounded-t-lg transition-all duration-300"
+                          style={{ 
+                            height: d.skills.length > 0 ? `${heightPx}px` : '4px',
+                            backgroundColor: d.color 
+                          }} 
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
               <div className="flex gap-1">{levels.map(l => (<div key={l.value} className={`flex-1 text-center text-xs font-bold ${l.color} text-white rounded py-1`}>{l.value}</div>))}</div>
             </div>
