@@ -252,6 +252,138 @@ function EditModal({ skill, catId, onSave, onClose }) {
   );
 }
 
+// Smart Autocomplete Component for Skills
+function SkillAutocomplete({ value, onChange, skills, selectedCategory, categories, onCreateSkill }) {
+  const [inputValue, setInputValue] = useState('');
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [focusedIndex, setFocusedIndex] = useState(-1);
+  const inputRef = useRef(null);
+  const suggestionsRef = useRef(null);
+
+  // Get selected skill details
+  const selectedSkill = skills.find(s => s.id === value);
+
+  // Filter skills based on input
+  const filteredSkills = skills.filter(s =>
+    s.name.toLowerCase().includes(inputValue.toLowerCase())
+  ).slice(0, 10); // Limit to 10 suggestions
+
+  const handleInputChange = (e) => {
+    const val = e.target.value;
+    setInputValue(val);
+    setShowSuggestions(true);
+    setFocusedIndex(-1);
+    // Clear selection if user is typing
+    if (value) onChange('');
+  };
+
+  const handleSelectSkill = (skillId) => {
+    onChange(skillId);
+    const skill = skills.find(s => s.id === skillId);
+    setInputValue(skill ? skill.name : '');
+    setShowSuggestions(false);
+    setFocusedIndex(-1);
+  };
+
+  const handleCreateNew = () => {
+    if (!inputValue.trim()) return;
+
+    // If a category is selected, create in that category
+    // Otherwise, create in first category or prompt user
+    const targetCategoryId = selectedCategory || categories[0]?.id;
+    if (!targetCategoryId) return;
+
+    const newSkillId = onCreateSkill(targetCategoryId, inputValue.trim());
+    if (newSkillId) {
+      onChange(newSkillId);
+      setShowSuggestions(false);
+      setFocusedIndex(-1);
+    }
+  };
+
+  const handleKeyDown = (e) => {
+    if (!showSuggestions) return;
+
+    const itemCount = filteredSkills.length + (inputValue.trim() && filteredSkills.length === 0 ? 1 : 0);
+
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault();
+        setFocusedIndex(prev => (prev < itemCount - 1 ? prev + 1 : prev));
+        break;
+      case 'ArrowUp':
+        e.preventDefault();
+        setFocusedIndex(prev => (prev > 0 ? prev - 1 : -1));
+        break;
+      case 'Enter':
+        e.preventDefault();
+        if (focusedIndex >= 0 && focusedIndex < filteredSkills.length) {
+          handleSelectSkill(filteredSkills[focusedIndex].id);
+        } else if (focusedIndex === filteredSkills.length && inputValue.trim()) {
+          handleCreateNew();
+        }
+        break;
+      case 'Escape':
+        setShowSuggestions(false);
+        setFocusedIndex(-1);
+        break;
+    }
+  };
+
+  return (
+    <div className="relative flex-1">
+      <input
+        ref={inputRef}
+        type="text"
+        value={selectedSkill ? selectedSkill.name : inputValue}
+        onChange={handleInputChange}
+        onFocus={() => setShowSuggestions(true)}
+        onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
+        onKeyDown={handleKeyDown}
+        placeholder="Type to search or create skill..."
+        className="w-full p-2 border rounded-lg text-sm focus:border-blue-500 focus:outline-none"
+        autoComplete="off"
+      />
+
+      {showSuggestions && (inputValue || !selectedSkill) && (
+        <div
+          ref={suggestionsRef}
+          className="absolute z-50 w-full mt-1 bg-white border rounded-lg shadow-lg max-h-60 overflow-y-auto"
+        >
+          {filteredSkills.length > 0 ? (
+            <div>
+              {filteredSkills.map((skill, idx) => (
+                <div
+                  key={skill.id}
+                  onClick={() => handleSelectSkill(skill.id)}
+                  className={`p-2 cursor-pointer hover:bg-blue-50 ${focusedIndex === idx ? 'bg-blue-50' : ''}`}
+                >
+                  <div className="font-medium text-sm">{skill.name}</div>
+                  <div className="text-xs text-gray-500">{skill.catName}</div>
+                </div>
+              ))}
+            </div>
+          ) : inputValue.trim() ? (
+            <div
+              onClick={handleCreateNew}
+              className={`p-3 cursor-pointer hover:bg-green-50 border-l-4 border-green-500 ${focusedIndex === 0 ? 'bg-green-50' : ''}`}
+            >
+              <div className="font-medium text-sm text-green-700">+ Create "{inputValue}"</div>
+              <div className="text-xs text-gray-500">
+                {selectedCategory
+                  ? `in ${categories.find(c => c.id === selectedCategory)?.name}`
+                  : `in ${categories[0]?.name}`}
+              </div>
+            </div>
+          ) : (
+            <div className="p-3 text-sm text-gray-500">Type to search skills...</div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Mock Interview Session Modal
 function MockSessionModal({ categories, onSave, onClose }) {
   const [step, setStep] = useState('setup'); // setup, logging, review
@@ -259,9 +391,10 @@ function MockSessionModal({ categories, onSave, onClose }) {
   const [selectedCategory, setSelectedCategory] = useState('');
   const [overallScore, setOverallScore] = useState('');
   const [questions, setQuestions] = useState([{ skillId: '', question: '', score: '' }]);
-  
-  const categorySkills = selectedCategory ? categories.find(c => c.id === selectedCategory)?.subcategories || [] : [];
-  const allSkills = categories.flatMap(c => c.subcategories.map(s => ({ ...s, catId: c.id, catName: c.name })));
+  const [localCategories, setLocalCategories] = useState(categories);
+
+  const categorySkills = selectedCategory ? localCategories.find(c => c.id === selectedCategory)?.subcategories || [] : [];
+  const allSkills = localCategories.flatMap(c => c.subcategories.map(s => ({ ...s, catId: c.id, catName: c.name })));
 
   const addQuestion = () => setQuestions([...questions, { skillId: '', question: '', score: '' }]);
   const updateQuestion = (idx, field, value) => {
@@ -271,14 +404,39 @@ function MockSessionModal({ categories, onSave, onClose }) {
   };
   const removeQuestion = (idx) => setQuestions(questions.filter((_, i) => i !== idx));
 
+  // Handle creating new skill on-the-fly
+  const handleCreateSkill = (catId, skillName) => {
+    const newSkillId = `${catId}_${Date.now()}`;
+    const newSkill = {
+      id: newSkillId,
+      name: skillName,
+      level: null,
+      floor: 4, // Default floor
+      diffBar: 7,
+      floorCritical: true,
+      highWeight: false,
+      evidence: [],
+      notes: ''
+    };
+
+    // Update local categories
+    setLocalCategories(prev => prev.map(c =>
+      c.id === catId
+        ? { ...c, subcategories: [...c.subcategories, newSkill] }
+        : c
+    ));
+
+    return newSkillId;
+  };
+
   const handleSubmit = () => {
     const timestamp = new Date().toISOString();
     const date = new Date().toLocaleDateString();
-    
+
     // Build session record
     const session = {
       id: Date.now(),
-      name: sessionName || `Mock - ${selectedCategory ? categories.find(c => c.id === selectedCategory)?.name : 'Mixed'}`,
+      name: sessionName || `Mock - ${selectedCategory ? localCategories.find(c => c.id === selectedCategory)?.name : 'Mixed'}`,
       date,
       timestamp,
       category: selectedCategory,
@@ -308,7 +466,7 @@ function MockSessionModal({ categories, onSave, onClose }) {
       }
     });
 
-    onSave(session, skillUpdates);
+    onSave(session, skillUpdates, localCategories);
     onClose();
   };
 
@@ -348,12 +506,14 @@ function MockSessionModal({ categories, onSave, onClose }) {
               {questions.map((q, idx) => (
                 <div key={idx} className="p-3 bg-gray-50 rounded-xl space-y-2">
                   <div className="flex gap-2">
-                    <select value={q.skillId} onChange={e => updateQuestion(idx, 'skillId', e.target.value)} className="flex-1 p-2 border rounded-lg text-sm">
-                      <option value="">Select skill...</option>
-                      {(selectedCategory ? categorySkills : allSkills).map(s => (
-                        <option key={s.id} value={s.id}>{s.name}</option>
-                      ))}
-                    </select>
+                    <SkillAutocomplete
+                      value={q.skillId}
+                      onChange={(skillId) => updateQuestion(idx, 'skillId', skillId)}
+                      skills={selectedCategory ? categorySkills : allSkills}
+                      selectedCategory={selectedCategory}
+                      categories={localCategories}
+                      onCreateSkill={handleCreateSkill}
+                    />
                     <input type="number" min="1" max="10" value={q.score} onChange={e => updateQuestion(idx, 'score', e.target.value)} placeholder="/10" className="w-16 p-2 border rounded-lg text-sm text-center" />
                     {questions.length > 1 && (
                       <button onClick={() => removeQuestion(idx)} className="p-2 text-red-500"><X className="w-4 h-4" /></button>
@@ -508,10 +668,29 @@ export default function App() {
     setRatingModal(null);
   }, [updateSkill]);
 
-  const saveMockSession = useCallback((session, skillUpdates) => {
+  const saveMockSession = useCallback((session, skillUpdates, updatedCategories) => {
     // Save the session
     setMockSessions(prev => [session, ...prev]);
-    
+
+    // First, merge any newly created skills from the modal
+    if (updatedCategories) {
+      setCategories(prevCategories => {
+        return prevCategories.map(prevCat => {
+          const updatedCat = updatedCategories.find(c => c.id === prevCat.id);
+          if (updatedCat) {
+            // Merge subcategories, adding any new ones
+            const existingSkillIds = new Set(prevCat.subcategories.map(s => s.id));
+            const newSkills = updatedCat.subcategories.filter(s => !existingSkillIds.has(s.id));
+            return {
+              ...prevCat,
+              subcategories: [...prevCat.subcategories, ...newSkills]
+            };
+          }
+          return prevCat;
+        });
+      });
+    }
+
     // Update all the skills with new evidence
     Object.entries(skillUpdates).forEach(([skillId, update]) => {
       setCategories(prev => prev.map(c => c.id === update.catId ? {
